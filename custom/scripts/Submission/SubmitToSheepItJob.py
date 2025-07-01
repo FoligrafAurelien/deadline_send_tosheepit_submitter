@@ -9,6 +9,7 @@ import os
 import imp # For Integration UI
 imp.load_source( 'IntegrationUI', RepositoryUtils.GetRepositoryFilePath( "submission/Integration/Main/IntegrationUI.py", True ) )
 import IntegrationUI
+import re
 
 scriptDialog = None
 
@@ -85,53 +86,79 @@ def SubmitButtonPressed(*args):
     global scriptDialog
 
     sceneFile = scriptDialog.GetValue("SceneBox")
-    projectName = scriptDialog.GetValue("ProjectNameBox").strip()
-    description = scriptDialog.GetValue("DescriptionBox").strip()
-    startFrame = scriptDialog.GetValue("StartFrameBox")
-    endFrame = scriptDialog.GetValue("EndFrameBox")
-    frameStep = scriptDialog.GetValue("FrameStepBox")
+    projectName = scriptDialog.GetValue("NameBox").strip()
+    comment = scriptDialog.GetValue("CommentBox").strip()
+    frames_input = scriptDialog.GetValue("FramesBox").strip()  # ex: "1-100,300-450"
     renderType = scriptDialog.GetValue("RenderTypeBox")
     isPublic = scriptDialog.GetValue("IsPublicBox")
     login = scriptDialog.GetValue("LoginBox").strip()
     password = scriptDialog.GetValue("PasswordBox")
 
-    # Checks
-    if not sceneFile or not projectName or not login or not password:
-        scriptDialog.ShowMessageBox("Please fill all mandatory fields and select a scene file.", "Error")
+    # === ZIP THE BLEND ===#
+
+    sceneFile = scriptDialog.GetValue("SceneBox")
+    files_to_zip = []
+
+    if sceneFile and os.path.exists(sceneFile):
+        files_to_zip.append(sceneFile)
+        blend1_file = sceneFile + "1"
+        if os.path.exists(blend1_file):
+            files_to_zip.append(blend1_file)
+    else:
+        scriptDialog.ShowMessageBox("Selected scene file does not exist.", "Error")
         return
 
-    files = [sceneFile]
-    blend1 = sceneFile + "1"
-    if os.path.exists(blend1):
-        files.append(blend1)
-
-    total_size = sum(os.path.getsize(f) for f in files if os.path.exists(f))
+    # Check total size BEFORE zipping (limit: 2GB)
+    total_size = sum(os.path.getsize(f) for f in files_to_zip if os.path.exists(f))
     if total_size > 2 * 1024 * 1024 * 1024:
-        scriptDialog.ShowMessageBox("Total files size exceeds 2GB. Submission aborted.", "Error")
+        scriptDialog.ShowMessageBox("Total size of .blend and .blend1 exceeds 2GB. Submission aborted.", "Error")
         return
 
-    # Zip files
-    zip_path = os.path.join(ClientUtils.GetDeadlineTempPath(), "to_sheepit_upload.zip")
+    # Name the zip after the scene (basename)
+    scene_basename = os.path.splitext(os.path.basename(sceneFile))[0]
+    zip_name = scene_basename + ".zip"
+    zip_path = os.path.join(ClientUtils.GetDeadlineTempPath(), zip_name)
+
+    # Create the ZIP
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        for f in files:
+        for f in files_to_zip:
             zipf.write(f, os.path.basename(f))
 
-    if os.path.getsize(zip_path) > 2 * 1024 * 1024 * 1024:
-        scriptDialog.ShowMessageBox("Zip file size exceeds 2GB. Submission aborted.", "Error")
-        os.remove(zip_path)
+    # Parse frames_input to identify all valid ranges
+    frame_ranges = [x.strip() for x in frames_input.split(",") if x.strip()]
+    ranges_list = []
+    has_non_range = False
+
+    for fr in frame_ranges:
+        # Regex to match valid range (e.g., "1-250")
+        m = re.match(r"^(\d+)-(\d+)$", fr)
+        if m:
+            startFrame = int(m.group(1))
+            endFrame = int(m.group(2))
+            ranges_list.append((startFrame, endFrame))
+        else:
+            has_non_range = True
+
+    if has_non_range:
+        scriptDialog.ShowMessageBox(
+            "SheepIt requires at least one frame range (ex: '1-100'). Single frames are not supported for remote submission. Please render isolated frames locally.",
+            "Invalid Frame List"
+        )
         return
 
-    # Place your authentication and POST code here (see messages précédents)
-    # Example:
-    # try:
-    #     sheepit_job_id = submit_sheepit_job(login, password, zip_path, projectName, description, startFrame, endFrame, frameStep, renderType, isPublic)
-    #     os.remove(zip_path)
-    # except Exception as e:
-    #     scriptDialog.ShowMessageBox("Submission to SheepIt failed:\n%s" % str(e), "Error")
-    #     if os.path.exists(zip_path):
-    #         os.remove(zip_path)
-    #     return
+    if not ranges_list:
+        scriptDialog.ShowMessageBox(
+            "Please enter at least one valid frame range (e.g. '1-100, 150-200').",
+            "Frame Range Error"
+        )
+        return
 
-    # Script de monitoring comme précédemment
+    for startFrame, endFrame in ranges_list:
+        # Generate unique job name for each range
+        job_name = "{}_{}-{}".format(os.path.basename(sceneFile), startFrame, endFrame)
+        # Place your code to zip, upload, and submit this range
+        # Example: submit_sheepit_job(..., job_name, ..., startFrame, endFrame, ...)
+        # ...
+        pass  # (submit logic goes here)
 
     scriptDialog.ShowMessageBox("SheepIt job submit UI test completed. (Integration with API pending.)", "DEBUG")
