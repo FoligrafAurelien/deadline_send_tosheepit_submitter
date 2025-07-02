@@ -4,12 +4,14 @@ from Deadline.Scripting import ClientUtils, FrameUtils, PathUtils, RepositoryUti
 from DeadlineUI.Controls.Scripting.DeadlineScriptDialog import DeadlineScriptDialog
 from System.IO import Path, StreamWriter
 from System.Text import Encoding
-import zipfile
-import os
 import imp # For Integration UI
 imp.load_source( 'IntegrationUI', RepositoryUtils.GetRepositoryFilePath( "submission/Integration/Main/IntegrationUI.py", True ) )
-import IntegrationUI
+import datetime
+import os
 import re
+import requests
+import zipfile
+
 
 scriptDialog = None
 
@@ -94,6 +96,27 @@ def SubmitButtonPressed(*args):
     login = scriptDialog.GetValue("LoginBox").strip()
     password = scriptDialog.GetValue("PasswordBox")
 
+    #=== TEST LOGIN ===#
+
+    # Test SheepIt login before proceeding
+    url = "https://www.sheepit-renderfarm.com/user/authenticate"
+    data = {
+        "login": login,
+        "password": password,
+        "do_login": "do_login",
+        "timezone": "Europe/Paris",
+        "account_login": "account_login"
+    }
+    session = requests.Session()
+    try:
+        resp = session.post(url, data=data, timeout=10)
+        if resp.status_code != 200 or "Incorrect" in resp.text or "incorrect" in resp.text:
+            scriptDialog.ShowMessageBox("Invalid SheepIt credentials. Please check your login and password.", "Authentication Error")
+            return
+    except Exception as e:
+        scriptDialog.ShowMessageBox("Error connecting to SheepIt: %s" % str(e), "Network Error")
+        return
+
     # === ZIP THE BLEND ===#
 
     sceneFile = scriptDialog.GetValue("SceneBox")
@@ -153,12 +176,57 @@ def SubmitButtonPressed(*args):
         )
         return
 
+    info_txt_path = r"C:\Users\Foligraf\Documents\DEV\info.txt"
+    with open(info_txt_path, "w", encoding="utf-8") as infof:
+        infof.write("===== SheepIt Deadline Submitter Variables =====\n")
+        infof.write("Datetime: %s\n" % datetime.datetime.now().isoformat())
+        infof.write("Scene file: %s\n" % sceneFile)
+        infof.write("Blend1 file: %s\n" % (blend1_file if 'blend1_file' in locals() else ""))
+        infof.write("Zipped to: %s\n" % zip_path)
+        infof.write("Project name: %s\n" % projectName)
+        infof.write("Description: %s\n" % comment)
+        infof.write("Login: %s\n" % login)
+        infof.write("Password: %s\n" % password)
+        infof.write("Render type: %s\n" % renderType)
+        infof.write("Is public: %s\n" % isPublic)
+        infof.write("FramesBox: %s\n" % frames_input)
+        infof.write("Frame ranges: %s\n" % str(ranges_list if 'ranges_list' in locals() else ""))
+        for startFrame, endFrame in ranges_list:
+            infof.write(" - Range: %s-%s\n" % (startFrame, endFrame))
+        infof.write("Total zip size (bytes): %s\n" % (os.path.getsize(zip_path) if os.path.exists(zip_path) else "NOT FOUND"))
+        infof.write("Total blend+blend1 size (bytes): %s\n" % total_size)
+        infof.write("\n")
+        pass  
     for startFrame, endFrame in ranges_list:
-        # Generate unique job name for each range
-        job_name = "{}_{}-{}".format(os.path.basename(sceneFile), startFrame, endFrame)
-        # Place your code to zip, upload, and submit this range
-        # Example: submit_sheepit_job(..., job_name, ..., startFrame, endFrame, ...)
-        # ...
-        pass  # (submit logic goes here)
+        try:
+            with open(zip_path, "rb") as fzip:
+                files_payload = {'file': (os.path.basename(zip_path), fzip)}
+                job_data = {
+                    'name': "%s_%d-%d" % (projectName, startFrame, endFrame),
+                    'description': comment,
+                    'start_frame': startFrame,
+                    'end_frame': endFrame,
+                    'frame_step': scriptDialog.GetValue("ChunkSizeBox"),
+                    'renderer': renderType.lower(),
+                    'public': "1" if isPublic else "0",
+                }
+                resp = session.post("https://www.sheepit-renderfarm.com/api/v2/job/", data=job_data, files=files_payload, timeout=60)
+            if resp.status_code != 200:
+                scriptDialog.ShowMessageBox("SheepIt returned HTTP %d:\n%s" % (resp.status_code, resp.text), "SheepIt Error")
+                return
+            try:
+                resp_json = resp.json()
+            except Exception:
+                scriptDialog.ShowMessageBox("Invalid JSON from SheepIt:\n%s" % resp.text, "SheepIt Error")
+                return
+            if "id" not in resp_json:
+                scriptDialog.ShowMessageBox("SheepIt error:\n%s" % (resp_json.get("message") or str(resp_json)), "SheepIt Error")
+                return
+            sheepit_job_id = resp_json["id"]
+            # Continue here (monitoring, log, etc.)
+
+        except Exception as e:
+            scriptDialog.ShowMessageBox("Exception while submitting job to SheepIt:\n%s" % str(e), "SheepIt Error")
+            return
 
     scriptDialog.ShowMessageBox("SheepIt job submit UI test completed. (Integration with API pending.)", "DEBUG")
