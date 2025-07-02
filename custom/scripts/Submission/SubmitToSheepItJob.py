@@ -261,9 +261,11 @@ def SubmitButtonPressed(*args):
         log_debug(f"Add job page exception: {e}")
         scriptDialog.ShowMessageBox(f"Error fetching project/add page: {e}", "SheepIt Error")
         return
-    log_debug("Champs du formulaire /project/add (parser.data):")
-    for k, v in parser.data.items():
-        log_debug(f"  {k}: {v}")
+        log_debug("Champs du formulaire /project/add (parser.data):")
+        for k, v in parser.data.items():
+            log_debug(f"  {k}: {v}")
+
+
     # ==== LOOP FOR EACH RANGE ====
     for startFrame, endFrame in ranges_list:
         try:
