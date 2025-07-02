@@ -59,7 +59,7 @@ def __main__():
     scriptDialog.AddControlToGrid( "FramesLabel", "LabelControl", "Frame List", 1, 0, "The list of frames to render.", False )
     scriptDialog.AddControlToGrid( "FramesBox", "TextControl", "", 1, 1 )
     scriptDialog.AddControlToGrid( "ChunkSizeLabel", "LabelControl", "Frames Step", 2, 0, "Define each frames which is render. ", False )
-    scriptDialog.AddRangeControlToGrid( "ChunkSizeBox", "RangeControl", 1, 1, 1000000, 0, 1, 2, 1 )
+    scriptDialog.AddRangeControlToGrid( "FrameStepBox", "RangeControl", 1, 1, 1000000, 0, 1, 2, 1 )
     scriptDialog.EndGrid()
 
     # ==== Render Type & Access ====
@@ -91,6 +91,7 @@ def SubmitButtonPressed(*args):
     projectName = scriptDialog.GetValue("NameBox").strip()
     comment = scriptDialog.GetValue("CommentBox").strip()
     frames_input = scriptDialog.GetValue("FramesBox").strip()  # ex: "1-100,300-450"
+    frames_step = scriptDialog.GetValue("FrameStepBox").strip()
     renderType = scriptDialog.GetValue("RenderTypeBox")
     isPublic = scriptDialog.GetValue("IsPublicBox")
     login = scriptDialog.GetValue("LoginBox").strip()
@@ -199,31 +200,25 @@ def SubmitButtonPressed(*args):
         pass  
     for startFrame, endFrame in ranges_list:
         try:
+           # Après login/authentification avec session
+            upload_url = "https://www.sheepit-renderfarm.com/job/add/"
             with open(zip_path, "rb") as fzip:
                 files_payload = {'file': (os.path.basename(zip_path), fzip)}
                 job_data = {
-                    'name': "%s_%d-%d" % (projectName, startFrame, endFrame),
+                    'name': projectName,
                     'description': comment,
                     'start_frame': startFrame,
                     'end_frame': endFrame,
-                    'frame_step': scriptDialog.GetValue("ChunkSizeBox"),
+                    'frame_step': frames_step,
                     'renderer': renderType.lower(),
                     'public': "1" if isPublic else "0",
                 }
-                resp = session.post("https://www.sheepit-renderfarm.com/api/v2/job/", data=job_data, files=files_payload, timeout=60)
-            if resp.status_code != 200:
-                scriptDialog.ShowMessageBox("SheepIt returned HTTP %d:\n%s" % (resp.status_code, resp.text), "SheepIt Error")
+                resp = session.post(upload_url, data=job_data, files=files_payload, timeout=60)
+
+            # Vérification du succès : recherche du message dans resp.text
+            if resp.status_code != 200 or "Project successfully created" not in resp.text:
+                scriptDialog.ShowMessageBox("SheepIt returned error (job/add):\n%s" % resp.text, "SheepIt Error")
                 return
-            try:
-                resp_json = resp.json()
-            except Exception:
-                scriptDialog.ShowMessageBox("Invalid JSON from SheepIt:\n%s" % resp.text, "SheepIt Error")
-                return
-            if "id" not in resp_json:
-                scriptDialog.ShowMessageBox("SheepIt error:\n%s" % (resp_json.get("message") or str(resp_json)), "SheepIt Error")
-                return
-            sheepit_job_id = resp_json["id"]
-            # Continue here (monitoring, log, etc.)
 
         except Exception as e:
             scriptDialog.ShowMessageBox("Exception while submitting job to SheepIt:\n%s" % str(e), "SheepIt Error")
